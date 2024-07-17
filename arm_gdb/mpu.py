@@ -166,6 +166,10 @@ def get_rlar_reg():
     return [
         RegisterDef("MPU_RLAR", "MPU Region Base Limit Register", 0xE000EDA0, 4, [
             FieldBitfield("LIMIT", 5, 27, "Ending address (upper inclusive limit) of MPU region address"),
+            FieldBitfieldEnum("PXN", 4, 1, [
+                (0b1, False, "Execution from a privileged mode is not permitted", None),
+                (0b0, False, "Execution only permitted if read permitted", None),
+                ],"Privileged execute-never"),
             FieldBitfield("AttrIndx", 1, 3, "Attribute Index. Select memory attributes from attribute sets in MPU_MAIR0 and MPU_MAIR1"),
             FieldBitfieldEnum("EN", 0, 1, [
                 (0b0, False, "disable", None),
