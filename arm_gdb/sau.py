@@ -1,8 +1,5 @@
-# SPDX-FileCopyrightText: 2023 Max Sikström
 # SPDX-License-Identifier: MIT
 
-# Copyright © 2023 Max Sikström
-# Copyright © 2023 Niklas Hauser
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the “Software”), to deal
@@ -26,7 +23,7 @@ import gdb
 from .common import *
 import traceback
 
-def get_sau_common_regs():
+def get_sau_common_regs(model):
     return [
         RegisterDef("SAU_TYPE", "SAU Type Register", 0xE000EDD4, 4, [
             FieldBitfield("SREGION",  0, 8,
@@ -42,9 +39,32 @@ def get_sau_common_regs():
             FieldBitfield("REGION", 0, 8,
                         "Region number. Indicates the memory region accessed by SAU_RBAR and SAU_RLAR."),
         ]),
+
+        RegisterDef("SFSR", "SAU Secure Fault Status Register", 0xE000EDE4, 4, [
+            FieldBitfield("LSERR", 7, 1,
+                          "Lazy state error flag."),
+            FieldBitfield("SFARVALID", 6, 1,
+                          "Secure fault address valid."),
+            FieldBitfield("LSPERR", 5, 1,
+                          "Lazy state preservation error flag."),
+            FieldBitfield("INVTRAN", 4, 1,
+                          "Invalid transition flag."),
+            FieldBitfield("AUVIOL", 3, 1,
+                          "Attribution unit violation flag"),
+            FieldBitfield("INVEP", 2, 1,
+                          "Invalid exception return flag."),
+            FieldBitfield("INVIS,", 1, 1,
+                          "Invalid integrity signature flag."),
+            FieldBitfield("INVEP", 0, 1,
+                          "Invalid entry point."),
+        ]),
+        RegisterDef("SFAR", "Secure Fault Address Register", 0xE000EDE8, 4, [
+            FieldBitfield("REGION", 0, 31,
+                        "Address. The address of an access that caused an attribution unit violation"),
+        ]),
     ]
 
-def get_sau_region_regs():
+def get_sau_region_regs(model):
     return [
         RegisterDef(f"SAU_RBAR", f"SAU Region Base Address Register", 0xE000EDDC, 4, [
             FieldBitfieldMap("BASE", 5, 27, lambda x: format_int(x << 5, 32),
@@ -97,6 +117,7 @@ Modifier /b prints bitmasks in binary instead of hex
         self.add_mod('h', 'descr')
         self.add_mod('a', 'all')
         self.add_mod('b', 'binary')
+        self.add_mod('f', 'force')
 
     def invoke(self, argument, from_tty):
         args = self.process_args(argument)
@@ -108,9 +129,35 @@ Modifier /b prints bitmasks in binary instead of hex
             base = 1 if args['binary'] else 4
 
             inf = gdb.selected_inferior()
+            # Detect CPU type, convert to a useful key for dicts
+            CPUID = read_reg(inf, 0xE000ED00, 4)
+            model = {
+                "4100c200": ["M0", "v6"],
+                "4100c600": ["M0+", "v6"],
+                "4100c210": ["M1", "v6"],
+                "4100c230": ["M3", "v7"],
+                "4100c240": ["M4", "v7"],
+                "4100c270": ["M7", "v7"],
+                # TODO: support ARMv8-M, for now pretend it's v7, since it's similar
+                "4100d200": ["M23", "v8"],
+                "4100d210": ["M33", "v8"],
+                "63001320": ["M55", "v8"],
+                "4100d220": ["M55", "v8"],
+            }.get(format_int(CPUID & 0xff00fff0, 32), None)
 
-            common_regs = get_sau_common_regs()
-            region_regs = get_sau_region_regs()
+            if "v8" not in model and not args['force']:
+                print("MPU prinout only supported on ARMv8-M devices")
+                return
+
+            print("SAU for Cortex-%s - ARM%s-M" %
+                  ((model[0], model[1]) if model else ("XX", "XX")))
+
+            if args['force']:
+                print("(printing fields from all Cortex-M models)")
+                model = None
+
+            common_regs = get_sau_common_regs(set(model) if model is not None else None)
+            region_regs = get_sau_region_regs(set(model) if model is not None else None)
 
             print("\nSAU common registers:\n")
             for reg in common_regs:
